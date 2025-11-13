@@ -1,0 +1,229 @@
+﻿import { Router, Response } from 'express';
+import Block from '../models/Block';
+import { authMiddleware, AuthRequest } from '../middleware/auth';
+
+const router = Router();
+
+// Helper function to extract description from content
+const getDescriptionFromContent = (content: any, tipo: string): string => {
+  try {
+    let text = '';
+    
+    if (typeof content === 'string') {
+      text = content;
+    } else if (content.text) {
+      text = content.text;
+    } else if (content.title) {
+      text = content.title;
+    } else if (content.url) {
+      text = content.url;
+    }
+    
+    // Clean and get first 10 characters
+    text = text.trim();
+    return text.substring(0, 10);
+  } catch {
+    return '';
+  }
+};
+
+// Get all blocks for a page
+router.get('/page/:pageId', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const blocks = await Block.find({ pagina_id: req.params.pageId }).sort({ position: 1 });
+
+    const normalizedBlocks = blocks.map(b => {
+      let content;
+      try {
+        content = typeof b.contenido === 'string' ? JSON.parse(b.contenido) : b.contenido;
+      } catch {
+        content = { text: b.contenido };
+      }
+
+      // Map MongoDB types (Spanish) to frontend types (English)
+      let frontendType: string = b.tipo;
+      switch (b.tipo) {
+        case 'texto':
+          frontendType = 'text';
+          break;
+        case 'enlace':
+          frontendType = 'link';
+          break;
+        case 'imagen':
+          frontendType = 'image';
+          break;
+        case 'video':
+          frontendType = 'video';
+          break;
+        case 'pdf':
+          frontendType = 'pdf';
+          break;
+      }
+
+      return {
+        id: b._id,
+        page_id: b.pagina_id,
+        type: frontendType,
+        content: content,
+        position: b.position,
+        metadata: b.metadatos
+      };
+    });
+    res.json({ blocks: normalizedBlocks });
+  } catch (error) {
+    console.error('Get blocks error:', error);
+    res.status(500).json({ error: 'Error fetching blocks' });
+  }
+});
+
+// Create block
+router.post('/', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const { type, content, position, pageId } = req.body;
+    
+    // Generate description from content
+    const descripcion = getDescriptionFromContent(content, type);
+
+    const block = new Block({
+      pagina_id: pageId,
+      tipo: type || 'texto',
+      contenido: typeof content === 'object' ? JSON.stringify(content) : (content || ''),
+      metadatos: {
+        etiquetas: [],
+        tipo_archivo: type || 'texto',
+        descripcion: descripcion,
+      },
+      position: position || 0,
+    });
+
+    await block.save();
+
+    let parsedContent;
+    try {
+      parsedContent = typeof block.contenido === 'string' ? JSON.parse(block.contenido) : block.contenido;
+    } catch {
+      parsedContent = { text: block.contenido };
+    }
+
+    // Map MongoDB types (Spanish) to frontend types (English)
+    let frontendType: string = block.tipo;
+    switch (block.tipo) {
+      case 'texto':
+        frontendType = 'text';
+        break;
+      case 'enlace':
+        frontendType = 'link';
+        break;
+      case 'imagen':
+        frontendType = 'image';
+        break;
+      case 'video':
+        frontendType = 'video';
+        break;
+      case 'pdf':
+        frontendType = 'pdf';
+        break;
+    }
+
+    const normalized = {
+      id: block._id,
+      page_id: block.pagina_id,
+      type: frontendType,
+      content: parsedContent,
+      position: block.position,
+      metadata: block.metadatos
+    };
+    res.status(201).json({ block: normalized });
+  } catch (error) {
+    console.error('Create block error:', error);
+    res.status(500).json({ error: 'Error creating block' });
+  }
+});
+
+// Update block
+router.put('/:id', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const { type, content, position } = req.body;
+    const updateData: any = { position };
+
+    if (type) {
+      updateData.tipo = type;
+      updateData['metadatos.tipo_archivo'] = type;
+    }
+    if (content !== undefined) {
+      updateData.contenido = typeof content === 'object' ? JSON.stringify(content) : content;
+      
+      // Update description when content changes
+      const descripcion = getDescriptionFromContent(content, type);
+      updateData['metadatos.descripcion'] = descripcion;
+    }
+
+    const block = await Block.findByIdAndUpdate(
+      req.params.id,
+      updateData,
+      { new: true }
+    );
+
+    if (!block) {
+      return res.status(404).json({ error: 'Block not found' });
+    }
+
+    let parsedContent;
+    try {
+      parsedContent = typeof block.contenido === 'string' ? JSON.parse(block.contenido) : block.contenido;
+    } catch {
+      parsedContent = { text: block.contenido };
+    }
+
+    // Map MongoDB types (Spanish) to frontend types (English)
+    let frontendType: string = block.tipo;
+    switch (block.tipo) {
+      case 'texto':
+        frontendType = 'text';
+        break;
+      case 'enlace':
+        frontendType = 'link';
+        break;
+      case 'imagen':
+        frontendType = 'image';
+        break;
+      case 'video':
+        frontendType = 'video';
+        break;
+      case 'pdf':
+        frontendType = 'pdf';
+        break;
+    }
+
+    const normalized = {
+      id: block._id,
+      page_id: block.pagina_id,
+      type: frontendType,
+      content: parsedContent,
+      position: block.position,
+      metadata: block.metadatos
+    };
+    res.json({ block: normalized });
+  } catch (error) {
+    console.error('Update block error:', error);
+    res.status(500).json({ error: 'Error updating block' });
+  }
+});
+
+// Delete block
+router.delete('/:id', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const block = await Block.findByIdAndDelete(req.params.id);
+
+    if (!block) {
+      return res.status(404).json({ error: 'Block not found' });
+    }
+
+    res.json({ message: 'Block deleted successfully' });
+  } catch (error) {
+    console.error('Delete block error:', error);
+    res.status(500).json({ error: 'Error deleting block' });
+  }
+});
+
+export default router;
